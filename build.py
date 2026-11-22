@@ -9,6 +9,7 @@ import hashlib
 from collections import Counter, defaultdict
 from datetime import datetime
 from urllib.parse import quote
+import xml.etree.ElementTree as ET
 
 # ============================================================
 # ADULT AI ART PROMPTS — PRODUCTION STATIC WEBSITE BUILDER
@@ -1053,6 +1054,22 @@ def footer_html(depth=0):
             This website is an independent creative resource.
             External AI tools have their own policies and terms.
         </p>
+
+        <section class="network-footer" aria-labelledby="network-footer-title">
+            <h3 id="network-footer-title">Explore Our Interactive Network</h3>
+            <div class="footer-links">
+                <a href="https://ai-girlfriend-prompts.velvetgrid.workers.dev/">AI Girlfriend Prompts</a>
+                <a href="https://couples-intimacy-games.velvetgrid.workers.dev/">Couples Intimacy Games</a>
+                <a href="https://fantasy-roleplay-hub.velvetgrid.workers.dev/">Fantasy Roleplay Hub</a>
+                <a href="https://character-persona-hub.velvetgrid.workers.dev/">Character Persona Hub</a>
+                <a href="https://flirty-chat-openers.velvetgrid.workers.dev/">Flirty Chat Openers</a>
+                <a href="https://midnight-audio-stories.velvetgrid.workers.dev/">Midnight Audio Stories</a>
+                <a href="https://spicy-party-games.velvetgrid.workers.dev/">Spicy Party Games</a>
+                <a href="https://intimacy-quiz-hub.velvetgrid.workers.dev/">Intimacy Quiz Hub</a>
+                <a href="https://couples-bucket-list.velvetgrid.workers.dev/">Couples Bucket List</a>
+                <a href="https://adult-ai-art-prompts.velvetgrid.workers.dev/">Adult AI Art Prompts</a>
+            </div>
+        </section>
     </div>
 </footer>
 <!-- AD_SLOT_STICKY_FOOTER -->
@@ -1093,6 +1110,8 @@ def meta_tags(title, description, url, page_type="website"):
 <title>{title}</title>
 <meta name="description" content="{description}">
 <meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="google-site-verification" content="Ee2L9A2G2nVVNtBt7HiplcBJf1nSen-Rcz4sNqLuAdc" />
+<meta name="msvalidate.01" content="4573069C62AEC27DA4F08DC57760BAD4" />
 <meta name="rating" content="RTA-5042-1996-1400-1577-RTA" />
 <link rel="canonical" href="{url}">
 <meta property="og:type" content="{esc(page_type)}">
@@ -2255,76 +2274,91 @@ def build_legal_pages():
 # ============================================================
 
 def build_sitemaps(rows, extra_paths):
-    urls = set()
+    """
+    Build a mandatory sitemap index and URL-set files from the completed
+    output directory so all generated HTML pages are included automatically.
+    """
+    if not os.path.isdir(OUTPUT_DIR):
+        raise RuntimeError(
+            "Sitemap generation failed: output directory does not exist."
+        )
 
-    urls.add(canonical(""))
+    html_paths = []
+    for root, dirs, files in os.walk(OUTPUT_DIR):
+        dirs[:] = sorted(
+            directory for directory in dirs
+            if directory not in {".git", "__pycache__"}
+        )
+        for filename in files:
+            if filename.lower().endswith(".html"):
+                absolute_path = os.path.join(root, filename)
+                relative_path = os.path.relpath(
+                    absolute_path, OUTPUT_DIR
+                ).replace(os.sep, "/")
+                html_paths.append(relative_path)
 
-    for item in rows:
-        urls.add(item_url(item))
+    if "index.html" not in html_paths:
+        raise RuntimeError(
+            "Sitemap generation failed: dist/index.html is missing."
+        )
 
-    for path in extra_paths:
-        urls.add(canonical(path))
+    ordered_paths = sorted(set(html_paths))
+    urls = [canonical(path) for path in ordered_paths]
+    if not urls:
+        raise RuntimeError(
+            "Sitemap generation failed: no HTML URLs were discovered."
+        )
 
-    ordered = sorted(urls)
+    today = datetime.utcnow().strftime("%Y-%m-%d")
 
     def url_entry(url):
-        return f"""
-    <url>
-        <loc>{esc(url)}</loc>
-        <lastmod>{datetime.utcnow().strftime("%Y-%m-%d")}</lastmod>
-    </url>"""
+        return (
+            "    <url>\n"
+            "        <loc>" + esc(url) + "</loc>\n"
+            "        <lastmod>" + today + "</lastmod>\n"
+            "    </url>"
+        )
 
+    # Keep below the protocol maximum of 50,000 URLs per sitemap.
+    chunk_size = min(max(int(SITEMAP_LIMIT), 1), 50000)
     chunks = [
-        ordered[i:i + SITEMAP_LIMIT]
-        for i in range(0, len(ordered), SITEMAP_LIMIT)
+        urls[index:index + chunk_size]
+        for index in range(0, len(urls), chunk_size)
     ]
-
-    if not chunks:
-        chunks = [[]]
-
-    # Main sitemap index.
     sitemap_refs = []
 
     for index, chunk in enumerate(chunks, start=1):
-        filename = f"sitemap-{index}.xml"
-
+        filename = "sitemap-" + str(index) + ".xml"
         sitemap_refs.append(
-            f"""
-    <sitemap>
-        <loc>{esc(canonical(filename))}</loc>
-        <lastmod>{datetime.utcnow().strftime("%Y-%m-%d")}</lastmod>
-    </sitemap>"""
+            "    <sitemap>\n"
+            "        <loc>" + esc(canonical(filename)) + "</loc>\n"
+            "        <lastmod>" + today + "</lastmod>\n"
+            "    </sitemap>"
         )
-
-        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{"".join(url_entry(url) for url in chunk)}
-</urlset>"""
-
-        write_file(
-            os.path.join(OUTPUT_DIR, filename),
-            xml
+        xml_content = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>\n'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+            + "\n".join(url_entry(url) for url in chunk)
+            + "\n</urlset>\n"
         )
+        write_file(os.path.join(OUTPUT_DIR, filename), xml_content)
 
-    sitemap_index = f"""<?xml version="1.0" encoding="UTF-8"?>
-<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-{"".join(sitemap_refs)}
-</sitemapindex>"""
-
-    write_file(
-        os.path.join(OUTPUT_DIR, "sitemap.xml"),
-        sitemap_index
+    sitemap_index = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<?xml-stylesheet type="text/xsl" href="sitemap.xsl"?>\n'
+        '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(sitemap_refs)
+        + "\n</sitemapindex>\n"
     )
+    sitemap_path = os.path.join(OUTPUT_DIR, "sitemap.xml")
+    write_file(sitemap_path, sitemap_index)
 
     xsl = r"""<?xml version="1.0" encoding="UTF-8"?>
 <xsl:stylesheet version="1.0"
  xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
  xmlns:s="http://www.sitemaps.org/schemas/sitemap/0.9">
-
 <xsl:output method="html" encoding="UTF-8" indent="yes"/>
-
 <xsl:template match="/">
 <html lang="en">
 <head>
@@ -2333,29 +2367,12 @@ def build_sitemaps(rows, extra_paths):
 <title>XML Sitemap | VelvetGrid</title>
 <style>
 *{box-sizing:border-box}
-body{
-margin:0;
-padding:40px 20px;
-background:#07080d;
-color:#f4f4fa;
-font-family:system-ui,sans-serif;
-}
+body{margin:0;padding:40px 20px;background:#07080d;color:#f4f4fa;font-family:system-ui,sans-serif}
 main{max-width:1000px;margin:auto}
 h1{color:#a78bfa}
 p{color:#a1a6bb}
-table{
-width:100%;
-border-collapse:collapse;
-background:#121521;
-border-radius:12px;
-overflow:hidden;
-}
-th,td{
-padding:14px;
-border-bottom:1px solid #282d40;
-text-align:left;
-overflow-wrap:anywhere;
-}
+table{width:100%;border-collapse:collapse;background:#121521;border-radius:12px;overflow:hidden;margin:20px 0}
+th,td{padding:14px;border-bottom:1px solid #282d40;text-align:left;overflow-wrap:anywhere}
 th{color:#67e8f9}
 a{color:#06b6d4}
 tr:hover{background:#181c2b}
@@ -2365,42 +2382,100 @@ tr:hover{background:#181c2b}
 <main>
 <h1>VelvetGrid XML Sitemap</h1>
 <p>Generated website URLs for search engine discovery.</p>
+<xsl:if test="s:urlset">
 <table>
-<thead>
-<tr><th>URL</th><th>Last Modified</th></tr>
-</thead>
+<thead><tr><th>URL</th><th>Last Modified</th></tr></thead>
 <tbody>
 <xsl:for-each select="s:urlset/s:url">
-<tr>
-<td><a href="{s:loc}"><xsl:value-of select="s:loc"/></a></td>
-<td><xsl:value-of select="s:lastmod"/></td>
-</tr>
+<tr><td><a href="{s:loc}"><xsl:value-of select="s:loc"/></a></td><td><xsl:value-of select="s:lastmod"/></td></tr>
 </xsl:for-each>
 </tbody>
 </table>
+</xsl:if>
+<xsl:if test="s:sitemapindex">
 <table>
-<thead>
-<tr><th>Sitemap</th><th>Last Modified</th></tr>
-</thead>
+<thead><tr><th>Sitemap</th><th>Last Modified</th></tr></thead>
 <tbody>
 <xsl:for-each select="s:sitemapindex/s:sitemap">
-<tr>
-<td><a href="{s:loc}"><xsl:value-of select="s:loc"/></a></td>
-<td><xsl:value-of select="s:lastmod"/></td>
-</tr>
+<tr><td><a href="{s:loc}"><xsl:value-of select="s:loc"/></a></td><td><xsl:value-of select="s:lastmod"/></td></tr>
 </xsl:for-each>
 </tbody>
 </table>
+</xsl:if>
 </main>
 </body>
 </html>
 </xsl:template>
 </xsl:stylesheet>
 """
+    write_file(os.path.join(OUTPUT_DIR, "sitemap.xsl"), xsl)
 
-    write_file(
-        os.path.join(OUTPUT_DIR, "sitemap.xsl"),
-        xsl
+    # Mandatory validation gate: parse index and every referenced URL set.
+    if not os.path.isfile(sitemap_path) or os.path.getsize(sitemap_path) == 0:
+        raise RuntimeError(
+            "Sitemap validation failed: dist/sitemap.xml is missing or empty."
+        )
+
+    namespace = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
+    try:
+        index_root = ET.parse(sitemap_path).getroot()
+    except ET.ParseError as error:
+        raise RuntimeError(
+            "Sitemap validation failed: sitemap.xml is invalid XML: " + str(error)
+        )
+
+    expected_index = "{http://www.sitemaps.org/schemas/sitemap/0.9}sitemapindex"
+    if index_root.tag != expected_index:
+        raise RuntimeError(
+            "Sitemap validation failed: sitemap.xml is not a sitemap index."
+        )
+
+    references = index_root.findall("sm:sitemap/sm:loc", namespace)
+    if not references:
+        raise RuntimeError(
+            "Sitemap validation failed: sitemap index has no sitemap references."
+        )
+
+    indexed_count = 0
+    for reference in references:
+        sitemap_url = clean_text(reference.text)
+        sitemap_filename = sitemap_url.rsplit("/", 1)[-1]
+        sitemap_file = os.path.join(OUTPUT_DIR, sitemap_filename)
+        if not os.path.isfile(sitemap_file):
+            raise RuntimeError(
+                "Sitemap validation failed: referenced file is missing: "
+                + sitemap_filename
+            )
+        try:
+            urlset_root = ET.parse(sitemap_file).getroot()
+        except ET.ParseError as error:
+            raise RuntimeError(
+                "Sitemap validation failed in " + sitemap_filename + ": "
+                + str(error)
+            )
+        expected_urlset = "{http://www.sitemaps.org/schemas/sitemap/0.9}urlset"
+        if urlset_root.tag != expected_urlset:
+            raise RuntimeError(
+                "Sitemap validation failed: " + sitemap_filename
+                + " is not a URL set."
+            )
+        entries = urlset_root.findall("sm:url/sm:loc", namespace)
+        if len(entries) > 50000:
+            raise RuntimeError(
+                "Sitemap validation failed: " + sitemap_filename
+                + " exceeds the 50,000 URL limit."
+            )
+        indexed_count += len(entries)
+
+    if indexed_count != len(urls):
+        raise RuntimeError(
+            "Sitemap validation failed: expected " + str(len(urls))
+            + " URLs but found " + str(indexed_count) + "."
+        )
+
+    print(
+        "Sitemap validated:", len(urls), "HTML URLs across",
+        len(references), "sitemap file(s)."
     )
 
 
@@ -2491,7 +2566,7 @@ def build_manifest(rows):
             "Tag hubs",
             "Related prompt recommendations",
             "JSON-LD structured data",
-            "XML sitemaps",
+            "Mandatory validated XML sitemap index and URL sets",
             "Cloudflare Pages headers"
         ]
     }
@@ -2608,6 +2683,13 @@ def main():
         extra_paths.append("tag/" + tag_slug + ".html")
 
     build_sitemaps(rows, extra_paths)
+
+    # Mandatory build gate: never report success without a valid sitemap.
+    required_sitemap = os.path.join(OUTPUT_DIR, "sitemap.xml")
+    if not os.path.isfile(required_sitemap) or os.path.getsize(required_sitemap) == 0:
+        raise RuntimeError(
+            "BUILD FAILED: mandatory dist/sitemap.xml is missing or empty."
+        )
 
     build_robots()
 
